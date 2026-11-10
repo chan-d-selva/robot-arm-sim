@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%23f28c28'/%3E%3C/svg%3E">
+<title>Robot Arm Sim Lab</title>
+<style>
+  :root { --bg:#e9edf2; --panel:rgba(255,255,255,.92); --ink:#1d2430; --mute:#6b7685; --accent:#f28c28; --line:#d9dee6; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; overflow:hidden; background:var(--bg); font:13px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif; color:var(--ink); }
+  #view { position:fixed; inset:0; }
+  #view canvas { display:block; }
+  .ui { transition:opacity .25s; }
+  body.clean .ui { opacity:0; pointer-events:none; }
+  #panel { position:fixed; top:12px; right:12px; width:290px; max-height:calc(100% - 24px); overflow:auto; background:var(--panel);
+           border:1px solid var(--line); border-radius:12px; box-shadow:0 6px 24px rgba(20,30,50,.12); backdrop-filter:blur(6px); }
+  #panel h1 { font-size:14px; margin:0; padding:12px 14px 10px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:8px; }
+  #panel h1 .dot { width:10px; height:10px; border-radius:50%; background:var(--accent); }
+  section { padding:10px 14px; border-bottom:1px solid var(--line); }
+  section:last-child { border-bottom:0; }
+  section h2 { font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--mute); margin:0 0 8px; font-weight:600; }
+  .row { display:flex; gap:6px; flex-wrap:wrap; }
+  button { font:inherit; border:1px solid var(--line); background:#fff; color:var(--ink); padding:6px 10px; border-radius:8px; cursor:pointer; }
+  button:hover { border-color:#b9c1cc; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  button.on { background:#1d2430; color:#fff; border-color:#1d2430; }
+  button.rec { background:#d93636; border-color:#d93636; color:#fff; font-weight:600; }
+  .grow { flex:1; }
+  .joint { display:grid; grid-template-columns:72px 1fr 44px; align-items:center; gap:6px; margin:3px 0; }
+  .joint label { color:var(--mute); }
+  .joint output { text-align:right; font-variant-numeric:tabular-nums; }
+  input[type=range] { width:100%; accent-color:var(--accent); }
+  .muted { color:var(--mute); font-size:12px; }
+  #help { position:fixed; left:12px; bottom:12px; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 12px;
+          box-shadow:0 6px 24px rgba(20,30,50,.10); width:400px; }
+  #help td:first-child { white-space:nowrap; }
+  #help b { display:block; margin-bottom:4px; }
+  #help table { border-collapse:collapse; }
+  #help td { padding:1px 6px 1px 0; vertical-align:top; }
+  kbd { font:11px ui-monospace,monospace; background:#fff; border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; padding:0 4px; }
+  #recBadge { position:fixed; top:12px; left:12px; background:#d93636; color:#fff; padding:6px 10px; border-radius:20px; font-weight:600; display:none; }
+  body.recording #recBadge { display:block; }
+  body.recording.clean #recBadge { opacity:.0; }
+  #toast { position:fixed; left:50%; top:16px; transform:translateX(-50%); background:#1d2430; color:#fff; padding:8px 14px; border-radius:20px;
+           opacity:0; transition:opacity .2s; pointer-events:none; }
+  #toast.show { opacity:.92; }
+  #status { position:fixed; left:50%; bottom:14px; transform:translateX(-50%); background:var(--panel); border:1px solid var(--line);
+            padding:6px 12px; border-radius:20px; color:var(--mute); }
+  @media (max-width:700px){ #help{display:none;} #panel{width:250px;} }
+</style>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+</head>
+<body>
+<div id="view"></div>
+<div id="recBadge" class="ui">● REC <span id="recTime">0:00</span></div>
+<div id="toast"></div>
+<div id="status" class="ui">Click a cube to pick it up</div>
+
+<div id="panel" class="ui">
+  <h1><span class="dot"></span>Robot Arm Sim Lab</h1>
+
+  <section>
+    <h2>Record video</h2>
+    <div class="row">
+      <button id="btnRec" class="primary grow">⏺ Record</button>
+      <button id="btnClean" title="H">Hide UI</button>
+    </div>
+    <p class="muted" style="margin:6px 0 0">Saves the 3D view only (no buttons or cursor). Press <kbd>H</kbd> to hide/show the panels.</p>
+  </section>
+
+  <section>
+    <h2>Quick actions</h2>
+    <div class="row">
+      <button id="btnDemo" class="primary">▶ Auto demo</button>
+      <button id="btnHome">Home</button>
+      <button id="btnGrip">Grip (Space)</button>
+      <button id="btnReset">Reset cubes</button>
+    </div>
+    <div class="joint" style="margin-top:8px"><label>Speed</label><input id="speed" type="range" min="0.25" max="2" step="0.05" value="1"><output id="speedOut">1.0×</output></div>
+  </section>
+
+  <section>
+    <h2>Camera</h2>
+    <div class="row">
+      <button data-view="1">1 Front</button><button data-view="2">2 Side</button><button data-view="3">3 Top</button><button data-view="4">4 Close</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button id="btnOrbit" class="grow">Cinematic orbit (C)</button>
+      <button id="btnGuides" class="on">Guides (G)</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Joints</h2>
+    <div id="joints"></div>
+  </section>
+
+  <section>
+    <h2>Teach &amp; replay</h2>
+    <div class="row">
+      <button id="btnAddWp" class="grow">＋ Save pose (P)</button>
+      <button id="btnPlay">▶ Play</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button id="btnLoop">Loop</button>
+      <button id="btnUndoWp">Undo</button>
+      <button id="btnClearWp">Clear</button>
+    </div>
+    <p class="muted" id="wpInfo" style="margin:6px 0 0">0 poses saved</p>
+  </section>
+</div>
+
+<div id="help" class="ui">
+  <b>Controls</b>
+  <table>
+    <tr><td>Mouse</td><td>Click cube = pick · click table = place · drag = orbit · wheel = zoom</td></tr>
+    <tr><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></td><td>Move gripper (relative to camera)</td></tr>
+    <tr><td><kbd>R</kbd>/<kbd>F</kbd></td><td>Up / down &nbsp; <kbd>Z</kbd>/<kbd>X</kbd> twist wrist</td></tr>
+    <tr><td><kbd>Space</kbd></td><td>Open / close gripper &nbsp; <kbd>Shift</kbd> = faster</td></tr>
+    <tr><td><kbd>1</kbd>–<kbd>4</kbd></td><td>Camera views &nbsp; <kbd>C</kbd> orbit &nbsp; <kbd>H</kbd> hide UI</td></tr>
+    <tr><td>Gamepad</td><td>Sticks move, <b>A</b> grips, bumpers twist</td></tr>
+  </table>
+</div>
+
+<script type="module" src="./main.js"></script>
+</body>
+</html>
